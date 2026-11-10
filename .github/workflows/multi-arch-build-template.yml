@@ -1,0 +1,70 @@
+name: Multi-arch build template
+
+on:
+  workflow_call:
+    inputs:
+      staging_image_name:
+        required: true
+        type: string
+        description: "The staging image name to build"
+      tag:
+        required: true
+        type: string
+        description: "The tag to apply to the image"
+      version:
+        required: true
+        type: string
+        description: "The version/path to build (e.g., commercial-editions/developer)"
+      extra_docker_build_args:
+        required: false
+        type: string
+        description: "Extra arguments to pass to docker buildx build"
+        default: ""
+      runs_on:
+        required: false
+        type: string
+        description: "The runner to use"
+        default: "github-ubuntu-latest-s"
+
+jobs:
+  multi-arch-build:
+    name: Build ${{ inputs.staging_image_name }}:${{ inputs.tag }} (${{ inputs.version }})
+    runs-on: ${{ inputs.runs_on }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - id: secrets
+        name: Retrieve secrets from Vault
+        uses: SonarSource/vault-action-wrapper@v3
+        with:
+          secrets: |
+            development/kv/data/docker/sonardockerrw username | docker_username;
+            development/kv/data/docker/sonardockerrw access_token_rwd | docker_password;
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          username: ${{ fromJSON(steps.secrets.outputs.vault).docker_username }}
+          password: ${{ fromJSON(steps.secrets.outputs.vault).docker_password }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          name: multibuilder
+          driver: docker-container
+
+      - name: Set up QEMU for multi-arch builds
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: all
+
+      - name: Build and push multi-arch image
+        env:
+          STAGING_IMAGE_NAME: ${{ inputs.staging_image_name }}
+          TAG: ${{ inputs.tag }}
+          VERSION: ${{ inputs.version }}
+          EXTRA_DOCKER_BUILD_ARGS: ${{ inputs.extra_docker_build_args }}
+        run: |
+          echo "Build the ${STAGING_IMAGE_NAME}:${TAG} image supporting two architectures, linux/amd64 and linux/arm64"
+          .github/workflows/scripts/multi-arch-build.sh "${STAGING_IMAGE_NAME}" "${TAG}" "${VERSION}"

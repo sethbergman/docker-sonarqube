@@ -1,0 +1,69 @@
+{
+  "agent-orchestrator": {
+    "registry": "sonarsource",
+    "name": "sonarqube-agent-orchestrator",
+    "tag": "2026.5.2"
+  },
+  "hunter-agent": {
+    "registry": "sonarsource",
+    "name": "sonarqube-hunter-agent",
+    "tag": "2026.5.2"
+  },
+  "remediation-agent": {
+    "registry": "sonarsource",
+    "name": "sonarqube-remediation-agent",
+    "tag": "2026.5.1"
+  },
+  "vortex": {
+    "registry": "sonarsource",
+    "name": "sonar-vortex",
+    "tag": "2026.5.1"
+  },
+  "sonarqube": {
+    "registry": "",
+    "name": "sonarqube",
+    "tag": "2026.5.4"
+  },
+  "postgres": {
+    "registry": "",
+    "name": "postgres",
+    "tag": "18-alpine",
+    "digest": "sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873"
+  },
+  "storage-init": {
+    "registry": "",
+    "name": "alpine",
+    "tag": "3.22",
+    "digest": "sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8"
+  },
+  "storage-probe": {
+    "registry": "",
+    "name": "alpine",
+    "tag": "3.22",
+    "digest": "sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8"
+  },
+  "egress-proxy": {
+    "registry": "",
+    "name": "ubuntu/squid",
+    "tag": "7.2-26.04_edge",
+    "digest": "sha256:d11db6479501aa4618b3253f95a88b2547229e2d081726b6fb20dc75a98cc61b"
+  },
+  "tls-proxy": {
+    "registry": "",
+    "name": "nginx",
+    "tag": "1.30-alpine",
+    "digest": "sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94"
+  },
+  "sonarqube-lb": {
+    "registry": "",
+    "name": "nginx",
+    "tag": "1.30-alpine",
+    "digest": "sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94"
+  },
+  "truststore-init": {
+    "registry": "",
+    "name": "eclipse-temurin",
+    "tag": "21-jre",
+    "digest": "sha256:d7051a45dd955e4d5d1db4d3f4269fe13d1c6dff8cc6b7ef89fc8577b96c1982"
+  }
+}

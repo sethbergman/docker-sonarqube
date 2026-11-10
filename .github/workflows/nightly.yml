@@ -1,0 +1,15 @@
+name: CI Scheduled (master nightly)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2AM UTC
+
+jobs:
+  run-ci:
+    name: CI
+    uses: ./.github/workflows/push_and_pr.yml
+    permissions:
+      id-token: write
+      contents: write
+      security-events: write

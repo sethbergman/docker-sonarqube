@@ -1,0 +1,21 @@
+This bundle fronts the orchestrator and Vortex with `agentic-proxy`, which serves a certificate for
+`${tls_server_name}` on port 8443, and on 8444 for Vortex. The generator issued it, and the one for
+`sonarqube-tls-proxy`, from a CA of its own: `tls/ca.crt` in this directory. Your SonarQube JVM
+must trust that CA. Import `tls/ca.crt` into the truststore from section 1. Do not copy `cacerts`
+over that file: it already holds the database CA. If section 1 used a truststore that was already
+configured, import into that file instead. `sonar.properties` already points at it. Restart
+SonarQube after this import:
+
+```
+keytool -importcert -noprompt -alias agentic-bundle-ca -file <this bundle>/tls/ca.crt \
+  -keystore ~/.sonarqube/sonarqube-truststore.jks -storepass changeit
+```
+
+Regenerating this bundle into the same directory keeps `tls/` and the certificates, so you import
+the CA once. The certificates are valid for 825 days. To issue new ones, for example after changing
+`--tls-server-name` or `--sonarqube-external-host`, delete `tls/` and regenerate, then import the new
+`tls/ca.crt` here and copy the new `sonarqube-tls-proxy/tls/` to your SonarQube machine.
+
+To serve your own certificate from `agentic-proxy` instead, replace `tls/agentic-proxy/tls.crt` (the
+full chain) and `tls/agentic-proxy/tls.key`, import the CA that issued it here instead, and run
+`docker compose up -d --force-recreate agentic-proxy`.

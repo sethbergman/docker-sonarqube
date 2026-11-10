@@ -1,28 +1,33 @@
 # Releasing
 
-Overview
---------
+## Docker image release cycle and SonarQube Server product
 
-Release of a new version of the official SonarQube Docker images is made of several operations:
+We consider the **docker image** as part of the SonarQube Server **product**. Therefore, it follows the same release process.
 
-1. bump the version of SonarQube in Dockerfiles
-2. Update the docker hub SonarQube's documentation (if applicable)
-3. Update Docker Hub's SonarQube images
-4. add a GIT tag for the new version 
+## Overview
 
+Release of a new version of the official SonarQube Server Docker images is made of several operations. 
 
-Bump the version of SonarQube in Dockerfiles
------------------------------
+> Please note that steps 1 and 2 are fully automated with [renovate](https://developer.mend.io/). When the SonarQube Server binaries are made available, please activate the Renovate scan to trigger a new release (i.e., `docker-sonarqube` -> `Actions` -> `Run Renovate Scan`).
 
-The version of SQ is hardcoded in each Dockerfile and must be updated in master branch.
+1. Set the new version of SonarQube Server (`SONARQUBE_VERSION`) to be released in the Dockerfiles. In case of community build, please remember to update `community-build/Dockerfile` only.
+2. Set the new version in `.github/github_env.yaml`. If you are releasing a new LTA, set `versions.current` in `.github/github_env.yaml` on the related lta branch. Otherwise, if you are releasing a Community build, set `versions.community_build` only. In all the other cases where a paid edition is about to be releases, set `versions.current` (please note that the nightly build will fail before the public image becomes available).
+3. Update the docker hub SonarQube Server's documentation (if applicable)
+4. Update Docker Hub's SonarQube Server images
+5. Add a GIT tag for the new version (This needs to be done after the images become available on DockerHub)
+   1. If you are releasing a SonarQube Server version, you need to [Add a New Release](https://github.com/SonarSource/docker-sonarqube/releases/new), where the name matches "SonarQube Server", followed by the release version, e.g., "SonarQube Server 2025.1.0".
+   2. Likewise, if you are releasing a Community Build, the release name should match "Community Build", followed by the release version, e.g., "Community Build 25.1.0.102122".
+   3. The Git tag for the SonarQube Community Build release must be the full version, e.g., `25.1.0.102122`.
 
+## Bump the version of SonarQube Server in Dockerfiles
 
-Update the docker hub SonarQube's documentation (if applicable)
--------------------------------
+The version of SonarQube Server is hardcoded in each Dockerfile of this repository and must be updated in master branch.
 
-If needed, prepare PR of Docker Hub documentation from SonarSource's fork of [https://github.com/docker-library/docs](https://github.com/docker-library/docs) named [sonarqube-docker-docs](https://github.com/SonarSource/sonarqube-docker-docs)
+## Update the docker hub SonarQube Server's documentation (if applicable)
 
-> Note: updating the fork should not be necessary as we only care about the `sonarqube` directory and are the only people updating it
+If needed, prepare PR of Docker Hub documentation [https://github.com/docker-library/docs](https://github.com/docker-library/docs).
+
+> Note: Please use your own fork like seen in [this closed PR](https://github.com/docker-library/docs/pull/1660)
 
 To create a good PR:
 
@@ -31,31 +36,34 @@ To create a good PR:
 
 To control the generated content of the Docker Hub page, look around in the files in `.template-helpers` of the [`docs` repository][docs]. For example, the "Where to get help" section is customized by a copy of `.template-helpers/get-help.md` in `sonarqube/get-help.md`.
 
-Until SonarQube is released and the public artifacts are available, keep your PR a draft PR to make it clear it is not ready to be merged yet.
+Until SonarQube Server is released and the public artifacts are available, keep your PR a draft PR to make it clear it is not ready to be merged yet.
 
 For more and up to date documentation, see https://github.com/docker-library/docs.
 
+## Update Docker Hub's SonarQube Server images
 
-Update Docker Hub's SonarQube images
------------------------
+In order to update the Docker Hub images, a Pull Request must be created on the [official-images](https://github.com/docker-library/official-images) repository. You can use your own personal fork or SonarSource's fork. The manifest (`library/sonarqube`) needs to be update in the following sections before opening a new PR.
 
-Update the SonarSource [fork](https://github.com/SonarSource/official-images) of the [official-images](https://github.com/docker-library/official-images) to ensure that the `sonarqube` library is the latest version.
+> The following steps can be automated using the go-tool described [here](./docker-official-images/README.md). This tool generates a `docker-official-images/official_images.txt` from all the versions in `docker-official-images/active_versions.json`.
 
-Create a feature branch on the company fork:
+You need to update:
+
 * `GitCommit` must be updated to this repository master branch's HEAD.
-* `Tags` and `Directory` must be added/updated appropriatly for each edition
-* see https://github.com/docker-library/official-images/pull/8837/files as an example
+* `GitFetch` is the branch/tag (e.g., refs/tags/10.8.1) where the commit can be found. Setting this value is only needed if you are releasing from a branch different from master.
+* `Tags` and `Directory` must be added/updated appropriately for each edition
 
-Until SonarQube is released and the public artifacts are available, keep your PR a draft PR to make it clear it is not ready to be merged yet.
+Please check the https://github.com/docker-library/official-images/pull/8837/files as an example.
+
+> In the future, also åthe folliwing steps will be also automated through github actions.
+
+Until SonarQube Server is released and the public artifacts are available, keep your PR a draft PR to make it clear it is not ready to be merged yet.
+
 * Create the PR [here](https://github.com/docker-library/official-images/compare)
-    * If the documentation was updated in the step before, reference that PR in this PR.
-* Click on *compare across fork* to be able to use the SonarSource fork as head repository.
-
+  * If the documentation was updated in the step before, reference that PR in this PR.
+* Click on *compare across fork* to be able to use the fork as head repository.
 
 For more and up to date documentation, see https://github.com/docker-library/official-images.
 
-
-Add a GIT tag for the new version 
-----------------
+## Add a GIT tag for the new version
 
 The commit referenced in the DockerHub Pull Request must be tagged with the (marketing) version of SQ: eg. `8.0`, `8.0.1`, `8.1`.

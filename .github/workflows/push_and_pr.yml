@@ -1,0 +1,469 @@
+name: CI - Build and Test
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' && !startsWith(github.ref, 'refs/heads/release/') }}
+
+on:
+  push:
+    branches:
+      - master
+      - 'release/**'
+    paths:
+      - 'commercial-editions/**/*'
+      - 'community-build/*'
+      - '.github/workflows/scripts/**'
+      - '.github/workflows/push_and_pr.yml'
+      - '.github/workflows/multi-arch-build-template.yml'
+      - '.github/workflows/multi-arch-test-template.yml'
+      - '.github/workflows/gcp-build-template.yml'
+      - '.github/github_env.yaml'
+      - '.github/trivy.yaml'
+      - '.trivyignore.yaml'
+      - 'run-tests.sh'
+      - 'docker-official-images/**/*'
+  pull_request:
+    paths:
+      - 'commercial-editions/**/*'
+      - 'community-build/*'
+      - '.github/workflows/scripts/**'
+      - '.github/workflows/push_and_pr.yml'
+      - '.github/workflows/multi-arch-build-template.yml'
+      - '.github/workflows/multi-arch-test-template.yml'
+      - '.github/workflows/gcp-build-template.yml'
+      - '.github/github_env.yaml'
+      - '.github/trivy.yaml'
+      - '.trivyignore.yaml'
+      - 'run-tests.sh'
+      - 'docker-official-images/**/*'
+  workflow_call:
+    inputs:
+      run_builds:
+        description: 'Run build jobs'
+        required: false
+        default: true
+        type: boolean
+      run_tests:
+        description: 'Run test jobs'
+        required: false
+        default: true
+        type: boolean
+      run_go_tests:
+        description: 'Run Go tests'
+        required: false
+        default: true
+        type: boolean
+      run_gcp_staging:
+        description: 'Run GCP staging builds (force on any branch)'
+        required: false
+        default: false
+        type: boolean
+      editions:
+        description: 'Which editions to build/test'
+        required: false
+        default: 'all'
+        type: string
+  workflow_dispatch:
+    inputs:
+      run_builds:
+        description: 'Run build jobs'
+        required: false
+        default: true
+        type: boolean
+      run_tests:
+        description: 'Run test jobs'
+        required: false
+        default: true
+        type: boolean
+      run_go_tests:
+        description: 'Run Go tests'
+        required: false
+        default: true
+        type: boolean
+      run_gcp_staging:
+        description: 'Run GCP staging builds (force on any branch)'
+        required: false
+        default: false
+        type: boolean
+      editions:
+        description: 'Which editions to build/test'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - commercial-only
+          - community-only
+
+jobs:
+  load-config:
+    uses: ./.github/workflows/load-config.yml
+
+  # Build phase - all editions in parallel
+  build-commercial-editions:
+    needs: load-config
+    if: |
+      (github.event_name != 'workflow_dispatch' || inputs.run_builds) &&
+      (github.event_name != 'workflow_dispatch' || inputs.editions == 'all' || inputs.editions == 'commercial-only')
+    name: Build commercial edition (${{ matrix.edition }})
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/multi-arch-build-template.yml
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: commercial-editions/developer
+            edition: developer
+          - version: commercial-editions/enterprise
+            edition: enterprise
+          - version: commercial-editions/datacenter/app
+            edition: datacenter-app
+          - version: commercial-editions/datacenter/search
+            edition: datacenter-search
+    with:
+      staging_image_name: ${{ needs.load-config.outputs.staging_image }}
+      tag: ${{ needs.load-config.outputs.current_version }}-master-${{ matrix.edition }}
+      version: ${{ matrix.version }}
+      runs_on: github-ubuntu-latest-s
+
+  build-community-build:
+    needs: load-config
+    if: |
+      (github.event_name != 'workflow_dispatch' || inputs.run_builds) &&
+      (github.event_name != 'workflow_dispatch' || inputs.editions == 'all' || inputs.editions == 'community-only')
+    name: Build community edition
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/multi-arch-build-template.yml
+    with:
+      staging_image_name: ${{ needs.load-config.outputs.staging_image }}
+      tag: ${{ needs.load-config.outputs.community_build_version }}-master-community
+      version: community-build
+      runs_on: github-ubuntu-latest-s
+
+  # Test phase - runs immediately after builds complete (no workflow_run delay)
+  test-commercial-editions:
+    needs: [load-config, build-commercial-editions]
+    if: |
+      (github.event_name != 'workflow_dispatch' || (always() && inputs.run_tests)) &&
+      (github.event_name != 'workflow_dispatch' || (always() && (inputs.editions == 'all' || inputs.editions == 'commercial-only')))
+    name: Test commercial edition (${{ matrix.test_name }}, ${{ matrix.architecture }})
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/multi-arch-test-template.yml
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - test_name: docker
+            edition: developer
+            architecture: amd64
+          - test_name: docker
+            edition: developer
+            architecture: arm64
+          - test_name: docker
+            edition: enterprise
+            architecture: amd64
+          - test_name: docker
+            edition: enterprise
+            architecture: arm64
+          - test_name: docker-compose
+            edition: datacenter
+            architecture: amd64
+          - test_name: docker-compose
+            edition: datacenter
+            architecture: arm64
+    with:
+      staging_image_name: ${{ needs.load-config.outputs.staging_image }}
+      tag: ${{ needs.load-config.outputs.current_version }}-master-${{ matrix.edition }}
+      test_name: ${{ matrix.test_name }}
+      architecture: ${{ matrix.architecture }}
+      runs_on: ${{ matrix.architecture == 'arm64' && 'github-ubuntu-24.04-arm-s' || 'github-ubuntu-latest-s' }}
+
+  test-community-build:
+    needs: [load-config, build-community-build]
+    if: |
+      (github.event_name != 'workflow_dispatch' || (always() && inputs.run_tests)) &&
+      (github.event_name != 'workflow_dispatch' || (always() && (inputs.editions == 'all' || inputs.editions == 'community-only')))
+    name: Test community edition (${{ matrix.architecture }})
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/multi-arch-test-template.yml
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture: [amd64, arm64]
+    with:
+      staging_image_name: ${{ needs.load-config.outputs.staging_image }}
+      tag: ${{ needs.load-config.outputs.community_build_version }}-master-community
+      test_name: docker
+      architecture: ${{ matrix.architecture }}
+      runs_on: ${{ matrix.architecture == 'arm64' && 'github-ubuntu-24.04-arm-s' || 'github-ubuntu-latest-s' }}
+
+  # Unit tests for the Trivy CVSS policy evaluator itself (SONAR-31880). Independent of
+  # the build/scan jobs below -- it only needs the script and its test fixtures, not a
+  # built image -- so it can run immediately without waiting on load-config.
+  test-trivy-policy-script:
+    name: Test Trivy CVSS policy script
+    runs-on: github-ubuntu-latest-s
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: pip install pytest
+
+      - name: Run policy evaluator tests
+        run: python3 -m pytest .github/workflows/scripts/tests -v
+
+  # Security scanning - runs after builds complete. Mirrors the
+  # build-commercial-editions / build-community-build split so every staging image
+  # (developer, enterprise, datacenter-app, datacenter-search, community) is scanned.
+  trivy-scan-commercial-editions:
+    needs: [load-config, build-commercial-editions]
+    if: |
+      always() &&
+      (github.event_name != 'workflow_dispatch' || inputs.editions == 'all' || inputs.editions == 'commercial-only')
+    name: Security Scan (${{ matrix.edition }})
+    runs-on: github-ubuntu-latest-s
+    permissions:
+      id-token: write
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        edition: [developer, enterprise, datacenter-app, datacenter-search]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - id: secrets
+        name: Retrieve secrets from Vault
+        uses: SonarSource/vault-action-wrapper@v3
+        with:
+          secrets: |
+            development/kv/data/docker/sonardockerrw username | docker_username;
+            development/kv/data/docker/sonardockerrw access_token_rwd | docker_password;
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          username: ${{ fromJSON(steps.secrets.outputs.vault).docker_username }}
+          password: ${{ fromJSON(steps.secrets.outputs.vault).docker_password }}
+
+      - name: Pull staging image
+        run: |
+          docker pull ${{ needs.load-config.outputs.staging_image }}:${{ needs.load-config.outputs.current_version }}-master-${{ matrix.edition }}
+
+      # Two invocations produce JSON (for the CVSS policy evaluator) and SARIF (for the
+      # Security tab). --config/--ignorefile/--ignore-unfixed/--show-suppressed are kept
+      # identical across both; only format/output/severity (Security-tab display scope) differ.
+      - name: Run Trivy vulnerability scanner (JSON, for policy evaluation)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          # Trivy severity is not the enforcement gate: scan every severity band,
+          # including UNKNOWN, so the evaluator sees every finding and judges it by CVSS.
+          TRIVY_SEVERITY: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
+          # show-suppressed has no dedicated action input; set it via env instead.
+          TRIVY_SHOW_SUPPRESSED: 'true'
+        with:
+          image-ref: '${{ needs.load-config.outputs.staging_image }}:${{ needs.load-config.outputs.current_version }}-master-${{ matrix.edition }}'
+          format: 'json'
+          output: 'trivy-${{ matrix.edition }}.json'
+          vuln-type: 'os'
+          trivy-config: '.github/trivy.yaml'
+          trivyignores: './.trivyignore.yaml'
+          ignore-unfixed: true
+
+      - name: Run Trivy vulnerability scanner (SARIF, for GitHub Security tab)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          # Set via env, not the `severity` input: the action only exports
+          # TRIVY_SEVERITY when the input differs from its own default (which is
+          # this exact string), otherwise it's silently dropped and Trivy falls
+          # back to .github/trivy.yaml's narrower severity list (no UNKNOWN).
+          TRIVY_SEVERITY: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
+          TRIVY_SHOW_SUPPRESSED: 'true'
+        with:
+          image-ref: '${{ needs.load-config.outputs.staging_image }}:${{ needs.load-config.outputs.current_version }}-master-${{ matrix.edition }}'
+          format: 'sarif'
+          output: 'trivy-${{ matrix.edition }}.sarif'
+          vuln-type: 'os'
+          trivy-config: '.github/trivy.yaml'
+          trivyignores: './.trivyignore.yaml'
+          ignore-unfixed: true
+
+      - name: Evaluate Trivy report against CVSS policy
+        run: python3 .github/workflows/scripts/evaluate-trivy-report.py trivy-${{ matrix.edition }}.json
+
+      - name: Upload Trivy results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        if: always()
+        with:
+          sarif_file: 'trivy-${{ matrix.edition }}.sarif'
+          category: 'image-${{ matrix.edition }}'
+
+  trivy-scan-community-build:
+    needs: [load-config, build-community-build]
+    if: |
+      always() &&
+      (github.event_name != 'workflow_dispatch' || inputs.editions == 'all' || inputs.editions == 'community-only')
+    name: Security Scan (community)
+    runs-on: github-ubuntu-latest-s
+    permissions:
+      id-token: write
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - id: secrets
+        name: Retrieve secrets from Vault
+        uses: SonarSource/vault-action-wrapper@v3
+        with:
+          secrets: |
+            development/kv/data/docker/sonardockerrw username | docker_username;
+            development/kv/data/docker/sonardockerrw access_token_rwd | docker_password;
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          username: ${{ fromJSON(steps.secrets.outputs.vault).docker_username }}
+          password: ${{ fromJSON(steps.secrets.outputs.vault).docker_password }}
+
+      - name: Pull staging image
+        run: |
+          docker pull ${{ needs.load-config.outputs.staging_image }}:${{ needs.load-config.outputs.community_build_version }}-master-community
+
+      - name: Run Trivy vulnerability scanner (JSON, for policy evaluation)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          TRIVY_SEVERITY: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
+          TRIVY_SHOW_SUPPRESSED: 'true'
+        with:
+          image-ref: '${{ needs.load-config.outputs.staging_image }}:${{ needs.load-config.outputs.community_build_version }}-master-community'
+          format: 'json'
+          output: 'trivy-community.json'
+          vuln-type: 'os'
+          trivy-config: '.github/trivy.yaml'
+          trivyignores: './.trivyignore.yaml'
+          ignore-unfixed: true
+
+      - name: Run Trivy vulnerability scanner (SARIF, for GitHub Security tab)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          # Set via env, not the `severity` input: the action only exports
+          # TRIVY_SEVERITY when the input differs from its own default (which is
+          # this exact string), otherwise it's silently dropped and Trivy falls
+          # back to .github/trivy.yaml's narrower severity list (no UNKNOWN).
+          TRIVY_SEVERITY: 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL'
+          TRIVY_SHOW_SUPPRESSED: 'true'
+        with:
+          image-ref: '${{ needs.load-config.outputs.staging_image }}:${{ needs.load-config.outputs.community_build_version }}-master-community'
+          format: 'sarif'
+          output: 'trivy-community.sarif'
+          vuln-type: 'os'
+          trivy-config: '.github/trivy.yaml'
+          trivyignores: './.trivyignore.yaml'
+          ignore-unfixed: true
+
+      - name: Evaluate Trivy report against CVSS policy
+        run: python3 .github/workflows/scripts/evaluate-trivy-report.py trivy-community.json
+
+      - name: Upload Trivy results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        if: always()
+        with:
+          sarif_file: 'trivy-community.sarif'
+          category: 'image-community'
+
+  # GCP staging builds - only on master or release branches, after tests pass
+  gcp-build-staging-app:
+    needs: [load-config, test-commercial-editions, test-community-build]
+    if: |
+      (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/release/')) ||
+      (always() && github.event_name == 'workflow_dispatch' && inputs.run_gcp_staging)
+    permissions:
+      id-token: write
+      contents: read
+    name: GCP build staging (app)
+    uses: ./.github/workflows/gcp-build-template.yml
+    with:
+      gcp_registry: ${{ needs.load-config.outputs.gcp_staging_registry }}
+      gcp_product_name: ${{ needs.load-config.outputs.gcp_staging_product }}
+      build_type: staging
+      platforms: linux/amd64,linux/arm64
+      extra_docker_build_args: "--provenance=false --annotation=manifest,manifest-descriptor:com.googleapis.cloudmarketplace.product.service.name=services/official-sonarqube-data-center-edition.endpoints.sonarsource-public.cloud.goog"
+      current_version: ${{ needs.load-config.outputs.current_version }}
+      component_type: app
+
+  gcp-build-staging-search:
+    needs: [load-config, test-commercial-editions, test-community-build]
+    if: |
+      (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/release/')) ||
+      (always() && github.event_name == 'workflow_dispatch' && inputs.run_gcp_staging)
+    permissions:
+      id-token: write
+      contents: read
+    name: GCP build staging (search)
+    uses: ./.github/workflows/gcp-build-template.yml
+    with:
+      gcp_registry: ${{ needs.load-config.outputs.gcp_staging_registry }}
+      gcp_product_name: ${{ needs.load-config.outputs.gcp_staging_product }}
+      build_type: staging
+      platforms: linux/amd64,linux/arm64
+      extra_docker_build_args: "--provenance=false --annotation=manifest,manifest-descriptor:com.googleapis.cloudmarketplace.product.service.name=services/official-sonarqube-data-center-edition.endpoints.sonarsource-public.cloud.goog"
+      current_version: ${{ needs.load-config.outputs.current_version }}
+      component_type: search
+
+  qa-validator:
+    if: always()
+    name: QA Validator
+    needs:
+      - load-config
+      - test-trivy-policy-script
+      - build-commercial-editions
+      - build-community-build
+      - test-commercial-editions
+      - test-community-build
+      - trivy-scan-commercial-editions
+      - trivy-scan-community-build
+      - gcp-build-staging-app
+      - gcp-build-staging-search
+    runs-on: github-ubuntu-latest-s
+    outputs:
+      SUCCESS: ${{ steps.alls-green.outputs.success }}
+    steps:
+      - uses: re-actors/alls-green@b5b5b37504aa4183270bd3d855c52a67f212be35 # v1.3.0
+        id: alls-green
+        with:
+          jobs: ${{ toJSON(needs) }}
+          allowed-skips: 'load-config,build-commercial-editions,build-community-build,test-commercial-editions,test-community-build,trivy-scan-commercial-editions,trivy-scan-community-build,gcp-build-staging-app,gcp-build-staging-search'
+
+  notify-slack-on-failure:
+    name: Notify on Failure
+    needs: [ qa-validator ]
+    if: >-
+      always() &&
+      (needs.qa-validator.result == 'failure') &&
+      github.event_name != 'pull_request' &&
+      github.event_name != 'pull_request_review' &&
+      (github.ref_name == github.event.repository.default_branch ||
+      startsWith(github.ref_name, 'release/'))
+    permissions:
+      id-token: write
+    uses: ./.github/workflows/slack_notify.yml

@@ -1,0 +1,101 @@
+on:
+  # Trigger analysis when pushing in master or pull requests, and when creating
+  # a pull request. 
+  push:
+    branches:
+      - master
+  pull_request:
+    types: [opened, synchronize, reopened]
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+    
+name: CI Scheduled (SonarQube scans nightly)
+permissions:
+  id-token: write
+  pull-requests: read
+  contents: read
+jobs:
+  go-test:
+    uses: ./.github/workflows/go-test-template.yml
+  agentic-compose-generator-test:
+    runs-on: github-ubuntu-latest-s
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: Set up Python
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: '3.13'
+    - name: Run tests with coverage
+      working-directory: agentic-compose-generator/
+      run: |
+        pip install coverage
+        coverage run --include=generate.py -m unittest discover -s tests
+        coverage xml -o coverage.xml
+    - name: Upload coverage file
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: agentic-compose-generator-coverage-${{ github.sha }}
+        path: agentic-compose-generator/coverage.xml
+        retention-days: 1
+  sonarqube:
+    runs-on: github-ubuntu-latest-s
+    needs: [go-test, agentic-compose-generator-test]
+    permissions:
+      id-token: write
+      pull-requests: read
+      contents: read
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        # Disabling shallow clone is recommended for improving relevancy of reporting
+        fetch-depth: 0
+    - id: secrets
+      uses: SonarSource/vault-action-wrapper@v3
+      with:
+        secrets: |
+          development/kv/data/next token | sq_next_token;
+          development/kv/data/sonarcloud token | sq_cloud_eu_token;
+          development/kv/data/sonarqube-us token | sq_cloud_us_token;
+    - name: retrieve test coverage
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        name: docker-official-images-coverage-${{ github.sha }}
+        path: docker-official-images/
+    - name: retrieve agentic-compose-generator test coverage
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        name: agentic-compose-generator-coverage-${{ github.sha }}
+        path: agentic-compose-generator/
+    - name: SonarQube Next Scan
+      uses: sonarsource/sonarqube-scan-action@v7
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        SONAR_TOKEN: ${{ fromJSON(steps.secrets.outputs.vault).sq_next_token }}
+        SONAR_HOST_URL: https://next.sonarqube.com/sonarqube/
+    - name: SonarQube Cloud EU Scan
+      if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      uses: sonarsource/sonarqube-scan-action@v7
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        SONAR_TOKEN: ${{ fromJSON(steps.secrets.outputs.vault).sq_cloud_eu_token }}
+        SONAR_HOST_URL: https://sonarcloud.io
+    - name: SonarQube Cloud US Scan
+      if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      uses: sonarsource/sonarqube-scan-action@v7
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        SONAR_TOKEN: ${{ fromJSON(steps.secrets.outputs.vault).sq_cloud_us_token }}
+        SONAR_HOST_URL: https://sonarqube.us
+    - name: Run IRIS Analysis
+      if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      uses: SonarSource/unified-dogfooding-actions/run-iris@b256ed29572b02741155dad9e6f20735076080e4 # v1
+      with:
+        primary_project_key: "SonarSource_docker-sonarqube_AYcnOvlJTpBOcQuGEdI5"
+        primary_platform: "Next"
+        shadow1_project_key: "SonarSource_docker-sonarqube_AYcnOvlJTpBOcQuGEdI5"
+        shadow1_platform: "SQC-EU"
+        shadow2_project_key: "SonarSource_docker-sonarqube_AYcnOvlJTpBOcQuGEdI5"
+        shadow2_platform: "SQC-US"

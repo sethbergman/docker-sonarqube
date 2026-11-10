@@ -1,0 +1,89 @@
+name: CI - Agentic Compose Generator
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' && !startsWith(github.ref, 'refs/heads/release/') }}
+
+on:
+  push:
+    branches:
+      - master
+      - 'release/**'
+    paths:
+      - 'agentic-compose-generator/**'
+      - '.github/workflows/agentic-compose-generator.yml'
+  pull_request:
+    paths:
+      - 'agentic-compose-generator/**'
+      - '.github/workflows/agentic-compose-generator.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: agentic-compose-generator
+
+jobs:
+  # The generator supports Python 3.9+ with the standard library only, so the tests need no
+  # dependencies. lint.sh also needs Docker Compose, but pulls no image.
+  test:
+    name: Unit tests and lint (Python ${{ matrix.python-version }})
+    runs-on: github-ubuntu-latest-s
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.13']
+    env:
+      # Comma-separated strings that must never reach a generated bundle. Kept in a secret so the
+      # list itself isn't published; unset (e.g. on forks), only the placeholder scan runs.
+      AGENTIC_GEN_FORBIDDEN: ${{ secrets.AGENTIC_GEN_FORBIDDEN }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run unit tests
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Lint every profile
+        run: ./tests/lint.sh
+
+  # Windows is a supported place to run the generator; Python 3.9 has no os.fchmod there.
+  test-windows:
+    name: Unit tests (Windows, Python ${{ matrix.python-version }})
+    runs-on: github-windows-latest-s
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.13']
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # The tests that issue certificates need openssl, which Git for Windows ships.
+      - name: Add Git's openssl to the PATH
+        run: Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files\Git\usr\bin'
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
+  egress-proxy:
+    name: Egress proxy allowlist
+    runs-on: github-ubuntu-latest-s
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Probe the allowlist
+        run: ./tests/egress-proxy.sh
